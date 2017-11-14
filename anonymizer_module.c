@@ -116,10 +116,10 @@ static char* getAnonymizedIPv4(apr_pool_t* pool, char* full_ip) {
 
     while ((lastToken = apr_strtok(ipToWorkOn, ".", &strtok_state)) != NULL) {
         ipToWorkOn = NULL;
-        ap_log_perror(APLOG_MARK, APLOG_DEBUG, 0, pool, APLOGNO(01001) "anonymizer detected ipv4 part %s", lastToken);
+        ap_log_perror(APLOG_MARK, APLOG_INFO, 0, pool, APLOGNO(01001) "anonymizer detected ipv4 part %s", lastToken);
         if (strtok_state[0] == '\0') {
             // skip this entry, because it's the last remaining fragment, when having last token
-            ap_log_perror(APLOG_MARK, APLOG_DEBUG, 0, pool, APLOGNO(01002) "anonymizer detected ipv4 LAST part %s", lastToken);
+            ap_log_perror(APLOG_MARK, APLOG_INFO, 0, pool, APLOGNO(01002) "anonymizer detected ipv4 LAST part %s", lastToken);
         } else {
             newIPv4address = apr_pstrcat(pool, newIPv4address, lastToken, ".", NULL);
         }
@@ -140,10 +140,10 @@ static char* getAnonymizedIPv6(apr_pool_t* pool, char* full_ip) {
 
     while ((lastToken = apr_strtok(ipToWorkOn, ":", &strtok_state)) != NULL) {
         ipToWorkOn = NULL;
-        ap_log_perror(APLOG_MARK, APLOG_DEBUG, 0, pool, APLOGNO(01001) "anonymizer detected ipv6 part %s", lastToken);
+        ap_log_perror(APLOG_MARK, APLOG_INFO, 0, pool, APLOGNO(01001) "anonymizer detected ipv6 part %s", lastToken);
         if (strtok_state[0] == '\0') {
             // skip this entry, because it's the last remaining fragment, when having last token
-            ap_log_perror(APLOG_MARK, APLOG_DEBUG, 0, pool, APLOGNO(01002) "anonymizer detected ipv6 LAST part %s", lastToken);
+            ap_log_perror(APLOG_MARK, APLOG_INFO, 0, pool, APLOGNO(01002) "anonymizer detected ipv6 LAST part %s", lastToken);
         } else {
             newIPv6address = apr_pstrcat(pool, newIPv6address, lastToken, ":", NULL);
         }
@@ -170,22 +170,22 @@ static char* getAnonymizedIPv6(apr_pool_t* pool, char* full_ip) {
 static int anonymizer_module_request_handler(request_rec* request) {
     anonymizer_cfg* configuration = (anonymizer_cfg*) ap_get_module_config(request->server->module_config, &anonymizer_module);
 
-    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00010) "checking anonymizer state");
+    ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00010) "checking anonymizer state");
 
     // check if we should work on this request
     if (configuration->enabled == false) {
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00020) "anonymizer disabled");
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00020) "anonymizer disabled");
         return DECLINED;
     }
 
-    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00021) "anonymizer enabled");
+    ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00021) "anonymizer enabled");
 
     // with Apache 2.4 the location of this information has changed
 #if AP_SERVER_MAJORVERSION_NUMBER > 2 || (AP_SERVER_MAJORVERSION_NUMBER == 2 && AP_SERVER_MINORVERSION_NUMBER >= 4)
-    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00030) "anonymizer found connection client IP %s", request->connection->client_ip);
-    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00031) "anonymizer found request useragent IP %s", request->useragent_ip);
+    ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00030) "anonymizer found connection client IP %s", request->connection->client_ip);
+    ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00031) "anonymizer found request useragent IP %s", request->useragent_ip);
 #else
-    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00032) "anonymizer found connection remote IP %s", request->connection->remote_ip);
+    ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00032) "anonymizer found connection remote IP %s", request->connection->remote_ip);
 #endif
 
 
@@ -194,23 +194,23 @@ static int anonymizer_module_request_handler(request_rec* request) {
     bool isValidIpv6_clientIP = is_ipv6(request->pool, request->connection->client_ip);
 
     if (isValidIpv4_clientIP) {
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00040) "anonymizer detected client IPv4");
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00040) "anonymizer detected client IPv4");
 
         // rebuild IPv4
         char* newIPv4address = getAnonymizedIPv4(request->pool, request->connection->client_ip);
 
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00041) "anonymizer rebuild client IP %s", newIPv4address);
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00041) "anonymizer rebuild client IP %s", newIPv4address);
 
         request->connection->client_ip = apr_pstrdup(request->connection->pool, newIPv4address);
         request->connection->client_addr->sa.sin.sin_addr.s_addr = inet_addr(newIPv4address);
     }
     if (isValidIpv6_clientIP) {
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00050) "anonymizer detected IPv6");
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00050) "anonymizer detected IPv6");
 
         // rebuild IPv6
         char* newIPv6address = getAnonymizedIPv6(request->pool, request->connection->client_ip);
 
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00041) "anonymizer rebuild client IP %s", newIPv6address);
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00041) "anonymizer rebuild client IP %s", newIPv6address);
 
         request->connection->client_ip = apr_pstrdup(request->connection->pool, newIPv6address);
         request->connection->client_addr->sa.sin.sin_addr.s_addr = inet_addr(newIPv6address);
@@ -221,23 +221,23 @@ static int anonymizer_module_request_handler(request_rec* request) {
     bool isValidIpv6_useragentIP = is_ipv6(request->pool, request->useragent_ip);
 
     if (isValidIpv4_useragentIP) {
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00060) "anonymizer detected useragent IPv4");
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00060) "anonymizer detected useragent IPv4");
 
         // rebuild IPv4
         char* newIPv4address = getAnonymizedIPv4(request->pool, request->useragent_ip);
 
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00061) "anonymizer rebuild useragent IP %s", newIPv4address);
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00061) "anonymizer rebuild useragent IP %s", newIPv4address);
 
         request->useragent_ip = apr_pstrdup(request->pool, newIPv4address);
         request->useragent_addr->sa.sin.sin_addr.s_addr = inet_addr(newIPv4address);
     }
     if (isValidIpv6_useragentIP) {
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00070) "anonymizer detected IPv6");
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00070) "anonymizer detected IPv6");
 
         // rebuild IPv6
         char* newIPv6address = getAnonymizedIPv6(request->pool, request->useragent_ip);
 
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00071) "anonymizer rebuild client IP %s", newIPv6address);
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00071) "anonymizer rebuild client IP %s", newIPv6address);
 
         request->useragent_ip = apr_pstrdup(request->connection->pool, newIPv6address);
         request->useragent_addr->sa.sin.sin_addr.s_addr = inet_addr(newIPv6address);
@@ -246,23 +246,23 @@ static int anonymizer_module_request_handler(request_rec* request) {
     bool isValidIpv4_remoteIP = is_ipv4(request->pool, request->connection->remote_ip);
     bool isValidIpv6_remoteIP = is_ipv6(request->pool, request->connection->remote_ip);
     if (isValidIpv4_remoteIP) {
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00080) "anonymizer detected remote IPv4");
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00080) "anonymizer detected remote IPv4");
 
         // rebuild IPv4
         char* newIPv4address = getAnonymizedIPv4(request->pool, request->connection->remote_ip);
 
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00081) "anonymizer rebuild remote IP %s", newIPv4address);
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00081) "anonymizer rebuild remote IP %s", newIPv4address);
 
         request->connection->remote_ip = apr_pstrdup(request->pool, newIPv4address);
         request->connection->remote_addr->sa.sin.sin_addr.s_addr = inet_addr(newIPv4address);
     }
     if (isValidIpv6_remoteIP) {
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00090) "anonymizer detected remote IPv6");
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00090) "anonymizer detected remote IPv6");
 
         // rebuild IPv6
         char* newIPv6address = getAnonymizedIPv6(request->pool, request->connection->remote_ip);
 
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, APLOGNO(00091) "anonymizer rebuild remote IP %s", newIPv6address);
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00091) "anonymizer rebuild remote IP %s", newIPv6address);
 
         request->connection->remote_ip = apr_pstrdup(request->connection->pool, newIPv6address);
         request->connection->remote_addr->sa.sin.sin_addr.s_addr = inet_addr(newIPv6address);
