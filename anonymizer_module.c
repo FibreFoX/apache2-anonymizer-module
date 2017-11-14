@@ -154,11 +154,9 @@ static char* getAnonymizedIPv6(apr_pool_t* pool, char* full_ip) {
         char* anonymizedIPv4fragment = getAnonymizedIPv4(pool, lastToken);
         newIPv6address = apr_pstrcat(pool, anonymizedIPv4fragment, NULL);
     } else {
+        // add our anonymize-fragment
         newIPv6address = apr_pstrcat(pool, newIPv6address, "0", NULL);
     }
-
-    // add our anonymize-fragment
-    newIPv6address = apr_pstrcat(pool, newIPv6address, "0", NULL);
 
     return newIPv6address;
 }
