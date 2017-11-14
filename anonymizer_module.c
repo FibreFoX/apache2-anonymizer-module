@@ -96,8 +96,8 @@ static const char* anonymizer_module_configuration_enable(cmd_parms* command_par
 //-----------------
 
 static bool is_ipv6(apr_pool_t* pool, char* ip) {
-    in_addr_t* convertedIP = (in_addr_t*) apr_pcalloc(pool, sizeof (in_addr_t));
-    return inet_pton(AF_INET6, ip, &convertedIP) == 1;
+    char buf[16];
+    return inet_pton(AF_INET6, ip, &buf) == 1;
 }
 
 static bool is_ipv4(apr_pool_t* pool, char* ip) {
