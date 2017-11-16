@@ -15,10 +15,8 @@
  */
 
 #include <stdbool.h> /* for bool */
-#include <sys/socket.h>
-#include <netinet/in.h>
+#include <netinet/in.h> /* for in_addr_t */
 #include <arpa/inet.h> /* for inet_pton() */
-#include <string.h> /* for strsep */
 
 #include "http_core.h" /* base stuff */
 #include "http_protocol.h" /* for ap_hook_post_read_request() */
@@ -26,13 +24,16 @@
 
 #include "ap_config.h" /* for ap_get_module_config() */
 
-#include "apr_pools.h" /* for struct apr_pool_t and memory_management */
-#include "apr_strings.h" /* for apr_strtok */
+#include "apr_pools.h" /* for struct apr_pool_t and memory management */
+#include "apr_strings.h" /* for apr_strtok, apr_pstrdup, apr_pstrcat */
 
 module AP_MODULE_DECLARE_DATA anonymizer_module;
 
 typedef struct {
+    // for enabling/disabling the module
     bool enabled;
+    // last part of the IP, make it adjustable (defaults to 0)
+    char* anonymizeFragment;
 } anonymizer_cfg;
 
 /*
@@ -52,6 +53,7 @@ typedef struct {
 static void* anonymizer_module_directory_config_handler(apr_pool_t* pool, char* dirspec) {
     anonymizer_cfg* configuration = (anonymizer_cfg*) apr_pcalloc(pool, sizeof (anonymizer_cfg));
     configuration->enabled = false;
+    configuration->anonymizeFragment = "0";
 
     return (void*) configuration;
 }
@@ -62,6 +64,7 @@ static void* anonymizer_module_directory_config_merge_handler(apr_pool_t* pool, 
 
     // we give full control on every level, so this deeper levels can re-enable again
     mergedConfiguration->enabled = directoryConfiguration2->enabled;
+    mergedConfiguration->anonymizeFragment = apr_pstrdup(pool, directoryConfiguration2->anonymizeFragment);
 
     return (void*) mergedConfiguration;
 }
@@ -69,6 +72,7 @@ static void* anonymizer_module_directory_config_merge_handler(apr_pool_t* pool, 
 static void* anonymizer_module_server_config_handler(apr_pool_t* pool, server_rec* server) {
     anonymizer_cfg* configuration = (anonymizer_cfg*) apr_pcalloc(pool, sizeof (anonymizer_cfg));
     configuration->enabled = false;
+    configuration->anonymizeFragment = "0";
 
     return (void*) configuration;
 }
@@ -78,6 +82,7 @@ static void* anonymizer_module_server_config_merge_handler(apr_pool_t* pool, voi
     anonymizer_cfg* serverConfiguration2 = (anonymizer_cfg*) server2_conf;
 
     mergedConfiguration->enabled = serverConfiguration2->enabled;
+    mergedConfiguration->anonymizeFragment = apr_pstrdup(pool, serverConfiguration2->anonymizeFragment);
 
     return (void*) mergedConfiguration;
 }
@@ -88,6 +93,13 @@ static const char* anonymizer_module_configuration_enable(cmd_parms* command_par
 
     return NULL;
 }
+
+static const char* anonymizer_module_configuration_fragment(cmd_parms* command_parameters, void* mconfig, const char *arg) {
+    anonymizer_cfg* configuration = (anonymizer_cfg*) ap_get_module_config(command_parameters->server->module_config, &anonymizer_module);
+    configuration->anonymizeFragment = apr_pstrdup(command_parameters->temp_pool, arg);
+
+    return NULL;
+}
 //-----------------
 // utils
 // http://man7.org/linux/man-pages/man3/inet_pton.3.html
@@ -95,17 +107,42 @@ static const char* anonymizer_module_configuration_enable(cmd_parms* command_par
 // https://stackoverflow.com/a/3736378/1961102
 //-----------------
 
+#if APR_HAVE_IPV6
+
 static bool is_ipv6(apr_pool_t* pool, char* ip) {
-    char buf[16];
-    return inet_pton(AF_INET6, ip, &buf) == 1;
+    // use proper type for ipv6
+    struct in6_addr* convertedIP = (struct in6_addr*) apr_pcalloc(pool, sizeof (struct in6_addr*));
+    return inet_pton(AF_INET6, ip, &convertedIP) == 1;
 }
+#endif
 
 static bool is_ipv4(apr_pool_t* pool, char* ip) {
     in_addr_t* convertedIP = (in_addr_t*) apr_pcalloc(pool, sizeof (in_addr_t));
     return inet_pton(AF_INET, ip, &convertedIP) == 1;
 }
 
-static char* getAnonymizedIPv4(request_rec* request, char* full_ip) {
+/**
+ * Separate @input by @delimiter, custom workaround for different problems:
+ * - apr_strtok/strtok does skip empty tokens
+ * - No apr_strsep-implementation
+ * - strsep is not c99 conform, not there on every system-architecture
+ * 
+ * @param input
+ * @param delimiter single char (unlike apr_strtop, we only need one single char for our purpose)
+ * @param remaining
+ * @return returns next token (string up to but not including @delimiter)
+ */
+static char* strseparate(apr_pool_t* pool, char* input, const char* delimiter, char** remaining) {
+    if (input == NULL && remaining == NULL || delimiter == NULL) {
+        return NULL;
+    }
+
+    char* inputToWorkOn = input;
+
+    return NULL;
+}
+
+static char* getAnonymizedIPv4(request_rec* request, char* full_ip, char* anonymizeFragment) {
     char* newIPv4address = "";
 
     char* ipToWorkOn = apr_pstrdup(request->pool, full_ip);
@@ -124,12 +161,13 @@ static char* getAnonymizedIPv4(request_rec* request, char* full_ip) {
     }
 
     // add our anonymize-fragment
-    newIPv4address = apr_pstrcat(request->pool, newIPv4address, "0", NULL);
+    newIPv4address = apr_pstrcat(request->pool, newIPv4address, anonymizeFragment, NULL);
 
     return newIPv4address;
 }
+#if APR_HAVE_IPV6
 
-static char* getAnonymizedIPv6(request_rec* request, char* full_ip) {
+static char* getAnonymizedIPv6(request_rec* request, char* full_ip, char* anonymizeFragment) {
     char* newIPv6address = "";
 
     char* ipToWorkOn = apr_pstrdup(request->pool, full_ip);
@@ -149,15 +187,16 @@ static char* getAnonymizedIPv6(request_rec* request, char* full_ip) {
 
     // last part can be ipv4, so check for it to anonymize
     if (is_ipv4(request->pool, lastToken)) {
-        char* anonymizedIPv4fragment = getAnonymizedIPv4(request, lastToken);
+        char* anonymizedIPv4fragment = getAnonymizedIPv4(request, lastToken, anonymizeFragment);
         newIPv6address = apr_pstrcat(request->pool, anonymizedIPv4fragment, NULL);
     } else {
         // add our anonymize-fragment
-        newIPv6address = apr_pstrcat(request->pool, newIPv6address, "0", NULL);
+        newIPv6address = apr_pstrcat(request->pool, newIPv6address, anonymizeFragment, NULL);
     }
 
     return newIPv6address;
 }
+#endif
 
 //-----------------
 // request handling
@@ -176,6 +215,10 @@ static int anonymizer_module_request_handler(request_rec* request) {
 
     ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00021) "anonymizer enabled");
 
+#if APR_HAVE_IPV6
+    ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00022) "anonymizer uses APR with IPv6 support enabled");
+#endif // APR_HAVE_IPV6
+
     // with Apache 2.4 the location of this information has changed
 #if AP_SERVER_MAJORVERSION_NUMBER > 2 || (AP_SERVER_MAJORVERSION_NUMBER == 2 && AP_SERVER_MINORVERSION_NUMBER >= 4)
     ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00030) "anonymizer found connection client IP %s", request->connection->client_ip);
@@ -187,83 +230,92 @@ static int anonymizer_module_request_handler(request_rec* request) {
 
 #if AP_SERVER_MAJORVERSION_NUMBER > 2 || (AP_SERVER_MAJORVERSION_NUMBER == 2 && AP_SERVER_MINORVERSION_NUMBER >= 4)
     bool isValidIpv4_clientIP = is_ipv4(request->pool, request->connection->client_ip);
-    bool isValidIpv6_clientIP = is_ipv6(request->pool, request->connection->client_ip);
-
     if (isValidIpv4_clientIP) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00040) "anonymizer detected client IPv4");
 
         // rebuild IPv4
-        char* newIPv4address = getAnonymizedIPv4(request, request->connection->client_ip);
+        char* newIPv4address = getAnonymizedIPv4(request, request->connection->client_ip, configuration->anonymizeFragment);
 
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00041) "anonymizer rebuild client IP %s", newIPv4address);
 
         request->connection->client_ip = apr_pstrdup(request->connection->pool, newIPv4address);
         request->connection->client_addr->sa.sin.sin_addr.s_addr = inet_addr(newIPv4address);
     }
+
+#if APR_HAVE_IPV6
+    bool isValidIpv6_clientIP = is_ipv6(request->pool, request->connection->client_ip);
     if (isValidIpv6_clientIP) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00050) "anonymizer detected IPv6");
 
         // rebuild IPv6
-        char* newIPv6address = getAnonymizedIPv6(request, request->connection->client_ip);
+        char* newIPv6address = getAnonymizedIPv6(request, request->connection->client_ip, configuration->anonymizeFragment);
 
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00041) "anonymizer rebuild client IP %s", newIPv6address);
 
         request->connection->client_ip = apr_pstrdup(request->connection->pool, newIPv6address);
         request->connection->client_addr->sa.sin.sin_addr.s_addr = inet_addr(newIPv6address);
     }
+#endif // APR_HAVE_IPV6
 
 
     bool isValidIpv4_useragentIP = is_ipv4(request->pool, request->useragent_ip);
-    bool isValidIpv6_useragentIP = is_ipv6(request->pool, request->useragent_ip);
 
     if (isValidIpv4_useragentIP) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00060) "anonymizer detected useragent IPv4");
 
         // rebuild IPv4
-        char* newIPv4address = getAnonymizedIPv4(request, request->useragent_ip);
+        char* newIPv4address = getAnonymizedIPv4(request, request->useragent_ip, configuration->anonymizeFragment);
 
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00061) "anonymizer rebuild useragent IP %s", newIPv4address);
 
         request->useragent_ip = apr_pstrdup(request->pool, newIPv4address);
         request->useragent_addr->sa.sin.sin_addr.s_addr = inet_addr(newIPv4address);
     }
+#if APR_HAVE_IPV6
+    bool isValidIpv6_useragentIP = is_ipv6(request->pool, request->useragent_ip);
     if (isValidIpv6_useragentIP) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00070) "anonymizer detected IPv6");
 
         // rebuild IPv6
-        char* newIPv6address = getAnonymizedIPv6(request, request->useragent_ip);
+        char* newIPv6address = getAnonymizedIPv6(request, request->useragent_ip, configuration->anonymizeFragment);
 
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00071) "anonymizer rebuild client IP %s", newIPv6address);
 
         request->useragent_ip = apr_pstrdup(request->connection->pool, newIPv6address);
         request->useragent_addr->sa.sin.sin_addr.s_addr = inet_addr(newIPv6address);
     }
-#else
+#endif // APR_HAVE_IPV6
+
+#else // apache 2.2 below
     bool isValidIpv4_remoteIP = is_ipv4(request->pool, request->connection->remote_ip);
-    bool isValidIpv6_remoteIP = is_ipv6(request->pool, request->connection->remote_ip);
     if (isValidIpv4_remoteIP) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00080) "anonymizer detected remote IPv4");
 
         // rebuild IPv4
-        char* newIPv4address = getAnonymizedIPv4(request, request->connection->remote_ip);
+        char* newIPv4address = getAnonymizedIPv4(request, request->connection->remote_ip, configuration->anonymizeFragment);
 
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00081) "anonymizer rebuild remote IP %s", newIPv4address);
 
         request->connection->remote_ip = apr_pstrdup(request->pool, newIPv4address);
         request->connection->remote_addr->sa.sin.sin_addr.s_addr = inet_addr(newIPv4address);
     }
+
+#if APR_HAVE_IPV6
+    bool isValidIpv6_remoteIP = is_ipv6(request->pool, request->connection->remote_ip);
     if (isValidIpv6_remoteIP) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00090) "anonymizer detected remote IPv6");
 
         // rebuild IPv6
-        char* newIPv6address = getAnonymizedIPv6(request, request->connection->remote_ip);
+        char* newIPv6address = getAnonymizedIPv6(request, request->connection->remote_ip, configuration->anonymizeFragment);
 
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00091) "anonymizer rebuild remote IP %s", newIPv6address);
 
         request->connection->remote_ip = apr_pstrdup(request->connection->pool, newIPv6address);
         request->connection->remote_addr->sa.sin.sin_addr.s_addr = inet_addr(newIPv6address);
     }
-#endif
+#endif // APR_HAVE_IPV6
+
+#endif // apache 2.2 VS apache 2.4 switch
 
     // as we are some middleware-handler, let others do their work too
     return DECLINED;
@@ -275,7 +327,8 @@ static int anonymizer_module_request_handler(request_rec* request) {
 
 // directives
 static const command_rec anonymizer_module_directives[] = {
-    AP_INIT_FLAG("Anonymize", anonymizer_module_configuration_enable, NULL, RSRC_CONF, "Enable anonymization of the requests IP address"),
+    AP_INIT_FLAG("Anonymize", anonymizer_module_configuration_enable, NULL, OR_OPTIONS, "Enable anonymization of the requests IP address"),
+    AP_INIT_TAKE1("AnonymizeFragment", anonymizer_module_configuration_fragment, NULL, OR_OPTIONS, "Sets the replacement part for anonymizing IP address, default is 0 (zero)"),
     {NULL}
 };
 
