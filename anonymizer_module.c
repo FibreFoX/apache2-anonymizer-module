@@ -98,15 +98,25 @@ static const char* anonymizer_module_configuration_enable(cmd_parms* command_par
 
 static const char* anonymizer_module_configuration_fragment(cmd_parms* command_parameters, void* mconfig, const char *arg) {
     anonymizer_cfg* configuration = (anonymizer_cfg*) ap_get_module_config(command_parameters->server->module_config, &anonymizer_module);
-    configuration->anonymizeFragmentV4 = apr_pstrdup(command_parameters->temp_pool, arg);
-    configuration->anonymizeFragmentV6 = apr_pstrdup(command_parameters->temp_pool, arg);
+    char* copyOfOriginalParameter = apr_pstrdup(command_parameters->temp_pool, arg);
+    int possibleValidNumber = atoi(copyOfOriginalParameter);
+    if (possibleValidNumber >= 0 && possibleValidNumber <= 255) {
+        // both IPv4 and IPv6 are limited to IPv4-range, only 0-255 is valid for IPv4
+        configuration->anonymizeFragmentV4 = apr_pstrdup(command_parameters->temp_pool, arg);
+        configuration->anonymizeFragmentV6 = apr_pstrdup(command_parameters->temp_pool, arg);
+    }
 
     return NULL;
 }
 
 static const char* anonymizer_module_configuration_fragmentV4(cmd_parms* command_parameters, void* mconfig, const char *arg) {
     anonymizer_cfg* configuration = (anonymizer_cfg*) ap_get_module_config(command_parameters->server->module_config, &anonymizer_module);
-    configuration->anonymizeFragmentV4 = apr_pstrdup(command_parameters->temp_pool, arg);
+    char* copyOfOriginalParameter = apr_pstrdup(command_parameters->temp_pool, arg);
+    int possibleValidNumber = atoi(copyOfOriginalParameter);
+    if (possibleValidNumber >= 0 && possibleValidNumber <= 255) {
+        // only 0-255 is valid for IPv4
+        configuration->anonymizeFragmentV4 = apr_pstrdup(command_parameters->temp_pool, arg);
+    }
 
     return NULL;
 }
