@@ -66,7 +66,8 @@ static void* anonymizer_module_directory_config_merge_handler(apr_pool_t* pool, 
 
     // we give full control on every level, so this deeper levels can re-enable again
     mergedConfiguration->enabled = directoryConfiguration2->enabled;
-    mergedConfiguration->anonymizeFragment = apr_pstrdup(pool, directoryConfiguration2->anonymizeFragment);
+    mergedConfiguration->anonymizeFragmentV4 = apr_pstrdup(pool, directoryConfiguration2->anonymizeFragmentV4);
+    mergedConfiguration->anonymizeFragmentV6 = apr_pstrdup(pool, directoryConfiguration2->anonymizeFragmentV6);
 
     return (void*) mergedConfiguration;
 }
@@ -74,7 +75,8 @@ static void* anonymizer_module_directory_config_merge_handler(apr_pool_t* pool, 
 static void* anonymizer_module_server_config_handler(apr_pool_t* pool, server_rec* server) {
     anonymizer_cfg* configuration = (anonymizer_cfg*) apr_pcalloc(pool, sizeof (anonymizer_cfg));
     configuration->enabled = false;
-    configuration->anonymizeFragment = "0";
+    configuration->anonymizeFragmentV4 = "0";
+    configuration->anonymizeFragmentV6 = "0";
 
     return (void*) configuration;
 }
@@ -84,7 +86,8 @@ static void* anonymizer_module_server_config_merge_handler(apr_pool_t* pool, voi
     anonymizer_cfg* serverConfiguration2 = (anonymizer_cfg*) server2_conf;
 
     mergedConfiguration->enabled = serverConfiguration2->enabled;
-    mergedConfiguration->anonymizeFragment = apr_pstrdup(pool, serverConfiguration2->anonymizeFragment);
+    mergedConfiguration->anonymizeFragmentV4 = apr_pstrdup(pool, serverConfiguration2->anonymizeFragmentV4);
+    mergedConfiguration->anonymizeFragmentV6 = apr_pstrdup(pool, serverConfiguration2->anonymizeFragmentV6);
 
     return (void*) mergedConfiguration;
 }
