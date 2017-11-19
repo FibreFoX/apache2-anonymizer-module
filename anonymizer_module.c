@@ -33,7 +33,8 @@ typedef struct {
     // for enabling/disabling the module
     bool enabled;
     // last part of the IP, make it adjustable (defaults to 0)
-    char* anonymizeFragment;
+    char* anonymizeFragmentV4;
+    char* anonymizeFragmentV6;
 } anonymizer_cfg;
 
 /*
@@ -53,7 +54,8 @@ typedef struct {
 static void* anonymizer_module_directory_config_handler(apr_pool_t* pool, char* dirspec) {
     anonymizer_cfg* configuration = (anonymizer_cfg*) apr_pcalloc(pool, sizeof (anonymizer_cfg));
     configuration->enabled = false;
-    configuration->anonymizeFragment = "0";
+    configuration->anonymizeFragmentV4 = "0";
+    configuration->anonymizeFragmentV6 = "0";
 
     return (void*) configuration;
 }
@@ -96,7 +98,22 @@ static const char* anonymizer_module_configuration_enable(cmd_parms* command_par
 
 static const char* anonymizer_module_configuration_fragment(cmd_parms* command_parameters, void* mconfig, const char *arg) {
     anonymizer_cfg* configuration = (anonymizer_cfg*) ap_get_module_config(command_parameters->server->module_config, &anonymizer_module);
-    configuration->anonymizeFragment = apr_pstrdup(command_parameters->temp_pool, arg);
+    configuration->anonymizeFragmentV4 = apr_pstrdup(command_parameters->temp_pool, arg);
+    configuration->anonymizeFragmentV6 = apr_pstrdup(command_parameters->temp_pool, arg);
+
+    return NULL;
+}
+
+static const char* anonymizer_module_configuration_fragmentV4(cmd_parms* command_parameters, void* mconfig, const char *arg) {
+    anonymizer_cfg* configuration = (anonymizer_cfg*) ap_get_module_config(command_parameters->server->module_config, &anonymizer_module);
+    configuration->anonymizeFragmentV4 = apr_pstrdup(command_parameters->temp_pool, arg);
+
+    return NULL;
+}
+
+static const char* anonymizer_module_configuration_fragmentV6(cmd_parms* command_parameters, void* mconfig, const char *arg) {
+    anonymizer_cfg* configuration = (anonymizer_cfg*) ap_get_module_config(command_parameters->server->module_config, &anonymizer_module);
+    configuration->anonymizeFragmentV6 = apr_pstrdup(command_parameters->temp_pool, arg);
 
     return NULL;
 }
@@ -167,7 +184,7 @@ static char* getAnonymizedIPv4(request_rec* request, char* full_ip, char* anonym
 }
 #if APR_HAVE_IPV6
 
-static char* getAnonymizedIPv6(request_rec* request, char* full_ip, char* anonymizeFragment) {
+static char* getAnonymizedIPv6(request_rec* request, char* full_ip, char* anonymizeFragmentV6, char* anonymizeFragmentV4) {
     char* newIPv6address = "";
 
     char* ipToWorkOn = apr_pstrdup(request->pool, full_ip);
@@ -187,11 +204,11 @@ static char* getAnonymizedIPv6(request_rec* request, char* full_ip, char* anonym
 
     // last part can be ipv4, so check for it to anonymize
     if (is_ipv4(request->pool, lastToken)) {
-        char* anonymizedIPv4fragment = getAnonymizedIPv4(request, lastToken, anonymizeFragment);
+        char* anonymizedIPv4fragment = getAnonymizedIPv4(request, lastToken, anonymizeFragmentV4);
         newIPv6address = apr_pstrcat(request->pool, anonymizedIPv4fragment, NULL);
     } else {
         // add our anonymize-fragment
-        newIPv6address = apr_pstrcat(request->pool, newIPv6address, anonymizeFragment, NULL);
+        newIPv6address = apr_pstrcat(request->pool, newIPv6address, anonymizeFragmentV6, NULL);
     }
 
     return newIPv6address;
@@ -234,7 +251,7 @@ static int anonymizer_module_request_handler(request_rec* request) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00040) "anonymizer detected client IPv4");
 
         // rebuild IPv4
-        char* newIPv4address = getAnonymizedIPv4(request, request->connection->client_ip, configuration->anonymizeFragment);
+        char* newIPv4address = getAnonymizedIPv4(request, request->connection->client_ip, configuration->anonymizeFragmentV4);
 
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00041) "anonymizer rebuild client IP %s", newIPv4address);
 
@@ -248,7 +265,7 @@ static int anonymizer_module_request_handler(request_rec* request) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00050) "anonymizer detected IPv6");
 
         // rebuild IPv6
-        char* newIPv6address = getAnonymizedIPv6(request, request->connection->client_ip, configuration->anonymizeFragment);
+        char* newIPv6address = getAnonymizedIPv6(request, request->connection->client_ip, configuration->anonymizeFragmentV6, configuration->anonymizeFragmentV4);
 
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00041) "anonymizer rebuild client IP %s", newIPv6address);
 
@@ -264,7 +281,7 @@ static int anonymizer_module_request_handler(request_rec* request) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00060) "anonymizer detected useragent IPv4");
 
         // rebuild IPv4
-        char* newIPv4address = getAnonymizedIPv4(request, request->useragent_ip, configuration->anonymizeFragment);
+        char* newIPv4address = getAnonymizedIPv4(request, request->useragent_ip, configuration->anonymizeFragmentV4);
 
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00061) "anonymizer rebuild useragent IP %s", newIPv4address);
 
@@ -277,7 +294,7 @@ static int anonymizer_module_request_handler(request_rec* request) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00070) "anonymizer detected IPv6");
 
         // rebuild IPv6
-        char* newIPv6address = getAnonymizedIPv6(request, request->useragent_ip, configuration->anonymizeFragment);
+        char* newIPv6address = getAnonymizedIPv6(request, request->useragent_ip, configuration->anonymizeFragmentV6, configuration->anonymizeFragmentV4);
 
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00071) "anonymizer rebuild client IP %s", newIPv6address);
 
@@ -292,7 +309,7 @@ static int anonymizer_module_request_handler(request_rec* request) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00080) "anonymizer detected remote IPv4");
 
         // rebuild IPv4
-        char* newIPv4address = getAnonymizedIPv4(request, request->connection->remote_ip, configuration->anonymizeFragment);
+        char* newIPv4address = getAnonymizedIPv4(request, request->connection->remote_ip, configuration->anonymizeFragmentV4);
 
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00081) "anonymizer rebuild remote IP %s", newIPv4address);
 
@@ -306,7 +323,7 @@ static int anonymizer_module_request_handler(request_rec* request) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00090) "anonymizer detected remote IPv6");
 
         // rebuild IPv6
-        char* newIPv6address = getAnonymizedIPv6(request, request->connection->remote_ip, configuration->anonymizeFragment);
+        char* newIPv6address = getAnonymizedIPv6(request, request->connection->remote_ip, configuration->anonymizeFragmentV6, configuration->anonymizeFragmentV4);
 
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00091) "anonymizer rebuild remote IP %s", newIPv6address);
 
@@ -328,7 +345,9 @@ static int anonymizer_module_request_handler(request_rec* request) {
 // directives
 static const command_rec anonymizer_module_directives[] = {
     AP_INIT_FLAG("Anonymize", anonymizer_module_configuration_enable, NULL, OR_OPTIONS, "Enable anonymization of the requests IP address"),
-    AP_INIT_TAKE1("AnonymizeFragment", anonymizer_module_configuration_fragment, NULL, OR_OPTIONS, "Sets the replacement part for anonymizing IP address, default is 0 (zero)"),
+    AP_INIT_TAKE1("AnonymizeFragment", anonymizer_module_configuration_fragment, NULL, OR_OPTIONS, "Sets the replacement part for anonymizing IP address (IPv4 + IPv6), default is 0 (zero)"),
+    AP_INIT_TAKE1("AnonymizeFragmentv4", anonymizer_module_configuration_fragmentV4, NULL, OR_OPTIONS, "Sets the replacement part for anonymizing IPv4 address, default is 0 (zero)"),
+    AP_INIT_TAKE1("AnonymizeFragmentv6", anonymizer_module_configuration_fragmentV6, NULL, OR_OPTIONS, "Sets the replacement part for anonymizing IPv6 address, default is 0 (zero)"),
     {NULL}
 };
 
