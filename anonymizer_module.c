@@ -64,7 +64,7 @@ static bool is_ipv4(apr_pool_t* pool, char* ip);
 #if APR_HAVE_IPV6
 static char* getAnonymizedIPv6(request_rec* request, char* full_ip, char* anonymizeFragmentV6, char* anonymizeFragmentV4);
 #endif
-static char* strseparate(apr_pool_t* pool, char* input, const char* delimiter, char** remaining);
+static char* strseparate(char* input, const char* delimiter, char** state);
 static char* getAnonymizedIPv4(request_rec* request, char* full_ip, char* anonymizeFragment);
 static int anonymizer_module_request_handler(request_rec* request);
 static void anonymizer_module_register_hooks(apr_pool_t* pool);
@@ -208,9 +208,11 @@ static const char* anonymizer_module_configuration_setFixedIPv6(cmd_parms* comma
 #if APR_HAVE_IPV6
 
 static bool is_ipv6(apr_pool_t* pool, char* ip) {
-    // use proper type for ipv6
-    struct in6_addr* convertedIP = (struct in6_addr*) apr_pcalloc(pool, sizeof (struct in6_addr*));
-    return inet_pton(AF_INET6, ip, &convertedIP) == 1;
+    // use proper type for ipv6 not possible, getting "stack smashing detected"
+//    struct in6_addr* convertedIP = (struct in6_addr*) apr_pcalloc(pool, sizeof (struct in6_addr));
+//    return inet_pton(AF_INET6, ip, &convertedIP) == 1;
+    char buf[16];
+    return inet_pton(AF_INET6, ip, &buf) == 1;
 }
 #endif
 
@@ -227,17 +229,51 @@ static bool is_ipv4(apr_pool_t* pool, char* ip) {
  * 
  * @param input
  * @param delimiter single char (unlike apr_strtop, we only need one single char for our purpose)
- * @param remaining
- * @return returns next token (string up to but not including @delimiter)
+ * @param state
+ * @return returns next token (string up to but not including @delimiter), NULL if end of string (\0) is hit
  */
-static char* strseparate(apr_pool_t* pool, char* input, const char* delimiter, char** remaining) {
-    if (input == NULL && remaining == NULL || delimiter == NULL) {
+static char* strseparate(char* input, const char* delimiter, char** state) {
+    // anti-mis-usage
+    if (delimiter == NULL || delimiter[0] == '\0') {
+        return NULL;
+    }
+    // when working on some string, NULL is passed as sign for "next on same string"
+    if (input == NULL) {
+        input = *state;
+    }
+
+    // in case this still is NULL, return our end
+    if (input == NULL) {
         return NULL;
     }
 
-    char* inputToWorkOn = input;
+    // copy starting position
+    char* token = input;
 
-    return NULL;
+    // there is no string/token left
+    if (input[0] == '\0') {
+        return NULL;
+    }
+
+    while (input[0] != '\0') {
+        // if we are on some delimiter
+        if (input[0] == delimiter[0]) {
+            // replace it with ZERO (to terminate that string)
+            // this will break the loop
+            input[0] = '\0';
+        } else {
+            // go to next
+            input++;
+        }
+    }
+
+    // go to the next entry (is ZERO on string-ending)
+    input++;
+
+    // remember last state
+    *state = input;
+
+    return token;
 }
 
 static char* getAnonymizedIPv4(request_rec* request, char* full_ip, char* anonymizeFragment) {
@@ -271,21 +307,25 @@ static char* getAnonymizedIPv6(request_rec* request, char* full_ip, char* anonym
     char* ipToWorkOn = apr_pstrdup(request->pool, full_ip);
     char* strtok_state;
     char* lastToken;
+    char* lastValidToken;
 
-    while ((lastToken = apr_strtok(ipToWorkOn, ":", &strtok_state)) != NULL) {
+    while ((lastToken = strseparate(ipToWorkOn, ":", &strtok_state)) != NULL) {
         ipToWorkOn = NULL;
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(01001) "anonymizer detected ipv6 part %s", lastToken);
         if (strtok_state[0] == '\0') {
             // skip this entry, because it's the last remaining fragment, when having last token
             ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(01002) "anonymizer detected ipv6 LAST part %s", lastToken);
+            lastValidToken = lastToken;
         } else {
             newIPv6address = apr_pstrcat(request->pool, newIPv6address, lastToken, ":", NULL);
         }
     }
 
+    ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(01003) "anonymizer check IPv6 LAST part being IPv4");
     // last part can be ipv4, so check for it to anonymize
-    if (is_ipv4(request->pool, lastToken)) {
-        char* anonymizedIPv4fragment = getAnonymizedIPv4(request, lastToken, anonymizeFragmentV4);
+    if (is_ipv4(request->pool, lastValidToken)) {
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(01004) "anonymizer found IPv4 ending in IPv6");
+        char* anonymizedIPv4fragment = getAnonymizedIPv4(request, lastValidToken, anonymizeFragmentV4);
         newIPv6address = apr_pstrcat(request->pool, anonymizedIPv4fragment, NULL);
     } else {
         // add our anonymize-fragment
@@ -327,6 +367,8 @@ static int anonymizer_module_request_handler(request_rec* request) {
 
 
 #if AP_SERVER_MAJORVERSION_NUMBER > 2 || (AP_SERVER_MAJORVERSION_NUMBER == 2 && AP_SERVER_MINORVERSION_NUMBER >= 4)
+
+    ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00000) "Checking if IPv4");
     bool isValidIpv4_clientIP = is_ipv4(request->pool, request->connection->client_ip);
     if (isValidIpv4_clientIP) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00040) "anonymizer detected client IPv4");
@@ -346,6 +388,7 @@ static int anonymizer_module_request_handler(request_rec* request) {
     }
 
 #if APR_HAVE_IPV6
+    ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00000) "Checking if IPv6");
     bool isValidIpv6_clientIP = is_ipv6(request->pool, request->connection->client_ip);
     if (isValidIpv6_clientIP) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, request, APLOGNO(00050) "anonymizer detected IPv6");
